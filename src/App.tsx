@@ -9,16 +9,19 @@ import {
   Alert,
   Button,
   CircularProgress,
+  IconButton,
   Link,
   List,
+  ListItem,
   ListItemButton,
   ListItemIcon,
   ListItemText,
   Stack,
   TextField,
+  ListSubheader,
   Typography,
 } from "@mui/material";
-import { ArrowBack } from "@mui/icons-material";
+import { ArrowBack, Refresh } from "@mui/icons-material";
 
 class ApiError extends Error {
   public fetch: boolean;
@@ -98,6 +101,12 @@ type Phase = {
     | null;
 };
 
+type Entrant = {
+  id: number;
+  name: string;
+  initialSeedNum: number;
+};
+
 async function fetchGql(
   key: string,
   query: string,
@@ -160,6 +169,29 @@ const EVENT_QUERY = `
         }
         progressions {
           id
+        }
+      }
+    }
+  }
+`;
+
+const SILVER_SETS_QUERY = `
+  query SilverSetsQuery($id: ID) {
+    phase(id: $id) {
+      sets(page: 1, perPage: 191, filters: { hideEmpty: true }) {
+        pageInfo {
+          total
+        }
+        nodes {
+          displayScore
+          slots {
+            entrant {
+              id
+              name
+              initialSeedNum
+            }
+          }
+          winnerId
         }
       }
     }
@@ -246,16 +278,98 @@ function App() {
   );
   const [silverPhaseId, setSilverPhaseId] = useState(0);
 
-  const bronzePhases = useMemo(
-    () =>
-      phases.filter(
-        (phase) =>
-          phase.bracketType === "SINGLE_ELIMINATION" &&
-          phase.progressingInData.length === 0
-      ),
-    [phases]
+  const [silverEntrants, setSilverEntrants] = useState<{
+    pending: Entrant[];
+    qualified: Entrant[];
+  }>({ pending: [], qualified: [] });
+  const getSilverEntrants = useCallback(
+    async (phaseId: number) => {
+      try {
+        setGetting(true);
+        const data = await fetchGql(sggApiKey, SILVER_SETS_QUERY, {
+          id: phaseId,
+        });
+        setError("");
+        const nodes = data?.phase?.sets?.nodes;
+        if (Array.isArray(nodes)) {
+          const allEntrants = new Map<number, Entrant>();
+          const dnqEntrants = new Map<number, Entrant>();
+          const lostEntrants = new Map<number, Entrant>();
+          nodes.forEach((set) => {
+            const { slots } = set;
+            if (Array.isArray(slots)) {
+              let winnerId: number | null = null;
+              if (set.winnerId && set.displayScore) {
+                winnerId = set.winnerId;
+              }
+              slots.forEach((slot) => {
+                if (slot.entrant) {
+                  allEntrants.set(slot.entrant.id, {
+                    id: slot.entrant.id,
+                    name: slot.entrant.name,
+                    initialSeedNum: slot.entrant.initialSeedNum,
+                  });
+                  if (winnerId) {
+                    if (
+                      slot.entrant.id === winnerId &&
+                      set.displayScore !== "DQ"
+                    ) {
+                      dnqEntrants.set(slot.entrant.id, {
+                        id: slot.entrant.id,
+                        name: slot.entrant.name,
+                        initialSeedNum: slot.entrant.initialSeedNum,
+                      });
+                    } else if (
+                      slot.entrant.id !== winnerId &&
+                      set.displayScore === "DQ"
+                    ) {
+                      dnqEntrants.set(slot.entrant.id, {
+                        id: slot.entrant.id,
+                        name: slot.entrant.name,
+                        initialSeedNum: slot.entrant.initialSeedNum,
+                      });
+                    } else if (
+                      slot.entrant.id !== winnerId &&
+                      set.displayScore !== "DQ"
+                    ) {
+                      lostEntrants.set(slot.entrant.id, {
+                        id: slot.entrant.id,
+                        name: slot.entrant.name,
+                        initialSeedNum: slot.entrant.initialSeedNum,
+                      });
+                    }
+                  }
+                }
+              });
+            }
+          });
+          Array.from(dnqEntrants.keys()).forEach((entrantId) => {
+            allEntrants.delete(entrantId);
+            lostEntrants.delete(entrantId);
+          });
+          const qualified = Array.from(lostEntrants.values()).sort(
+            (a, b) => a.initialSeedNum - b.initialSeedNum
+          );
+          qualified.forEach(({ id }) => {
+            allEntrants.delete(id);
+          });
+          setSilverEntrants({
+            qualified,
+            pending: Array.from(allEntrants.values()).sort(
+              (a, b) => a.initialSeedNum - b.initialSeedNum
+            ),
+          });
+        }
+      } catch (e: unknown) {
+        if (e instanceof Error) {
+          setError(e.message);
+        }
+      } finally {
+        setGetting(false);
+      }
+    },
+    [sggApiKey]
   );
-  const [bronzePhaseId, setBronzePhaseId] = useState(0);
 
   return (
     <Stack style={{ alignItems: "start" }}>
@@ -360,7 +474,6 @@ function App() {
                   setSlug("");
                   setEventId(0);
                   setSilverPhaseId(0);
-                  setBronzePhaseId(0);
                 }}
               >
                 <ListItemIcon>
@@ -404,7 +517,6 @@ function App() {
                     onClick={() => {
                       setEventId(0);
                       setSilverPhaseId(0);
-                      setBronzePhaseId(0);
                     }}
                   >
                     <ListItemIcon>
@@ -421,6 +533,7 @@ function App() {
                               key={phase.id}
                               onClick={() => {
                                 setSilverPhaseId(phase.id);
+                                getSilverEntrants(phase.id);
                               }}
                             >
                               <ListItemText
@@ -446,7 +559,7 @@ function App() {
                         style={{ paddingLeft: 0 }}
                         onClick={() => {
                           setSilverPhaseId(0);
-                          setBronzePhaseId(0);
+                          setSilverEntrants({ pending: [], qualified: [] });
                         }}
                       >
                         <ListItemIcon>
@@ -456,51 +569,43 @@ function App() {
                           Silver Phase ID: {silverPhaseId}
                         </ListItemText>
                       </ListItemButton>
-                      {!bronzePhaseId && (
-                        <>
-                          {bronzePhases.length > 0 && (
-                            <List disablePadding>
-                              {bronzePhases.map((phase) => (
-                                <ListItemButton
-                                  key={phase.id}
-                                  onClick={() => {
-                                    setBronzePhaseId(phase.id);
-                                  }}
-                                >
-                                  <ListItemText
-                                    style={{
-                                      overflowX: "hidden",
-                                      whiteSpace: "nowrap",
-                                    }}
-                                  >
-                                    {phase.name}{" "}
-                                    <Typography variant="caption">
-                                      ({phase.id})
-                                    </Typography>
-                                  </ListItemText>
-                                </ListItemButton>
-                              ))}
-                            </List>
-                          )}
-                        </>
-                      )}
-                      {bronzePhaseId > 0 && (
-                        <>
-                          <ListItemButton
-                            style={{ paddingLeft: 0 }}
-                            onClick={() => {
-                              setBronzePhaseId(0);
-                            }}
-                          >
-                            <ListItemIcon>
-                              <ArrowBack />
-                            </ListItemIcon>
-                            <ListItemText>
-                              Bronze Phase ID: {bronzePhaseId}
-                            </ListItemText>
-                          </ListItemButton>
-                        </>
-                      )}
+                      <Stack
+                        direction="row"
+                        style={{
+                          alignItems: "start",
+                          marginLeft: "-8px",
+                        }}
+                      >
+                        <IconButton
+                          disabled={getting}
+                          style={{ marginTop: "4px" }}
+                          onClick={() => {
+                            getSilverEntrants(silverPhaseId);
+                          }}
+                        >
+                          <Refresh />
+                        </IconButton>
+                        {silverEntrants.pending.length > 0 && (
+                          <List disablePadding>
+                            <ListSubheader>Pending</ListSubheader>
+                            {silverEntrants.pending.map((entrant) => (
+                              <ListItem key={entrant.id}>
+                                <ListItemText>{entrant.name}</ListItemText>
+                              </ListItem>
+                            ))}
+                          </List>
+                        )}
+                        {silverEntrants.qualified.length > 0 && (
+                          <List disablePadding>
+                            <ListSubheader>Qualified</ListSubheader>
+                            {silverEntrants.qualified.map((entrant) => (
+                              <ListItem key={entrant.id}>
+                                <ListItemText>{entrant.name}</ListItemText>
+                              </ListItem>
+                            ))}
+                          </List>
+                        )}
+                      </Stack>
                     </>
                   )}
                 </>
