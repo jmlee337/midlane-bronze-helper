@@ -21,7 +21,7 @@ import {
   ListSubheader,
   Typography,
 } from "@mui/material";
-import { ArrowBack, Refresh } from "@mui/icons-material";
+import { ArrowBack, Check, Close, Refresh } from "@mui/icons-material";
 
 class ApiError extends Error {
   public fetch: boolean;
@@ -175,13 +175,22 @@ const EVENT_QUERY = `
   }
 `;
 
+const NUM_POOLS_QUERY = `
+  query NumPoolsQuery($id: ID) {
+    phase(id: $id) {
+      phaseGroups(query: { page: 1, perPage: 512 }) {
+        nodes {
+          id
+        }
+      }
+    }
+  }
+`;
+
 const SILVER_SETS_QUERY = `
   query SilverSetsQuery($id: ID) {
     phase(id: $id) {
       sets(page: 1, perPage: 191, filters: { hideEmpty: true }) {
-        pageInfo {
-          total
-        }
         nodes {
           displayScore
           slots {
@@ -197,6 +206,15 @@ const SILVER_SETS_QUERY = `
     }
   }
 `;
+
+function getPool(initialSeedNum: number, numPools: number) {
+  const n = initialSeedNum - 1;
+  const row = Math.floor(n / numPools);
+  if (row % 2 === 0) {
+    return n % numPools;
+  }
+  return numPools * (row + 1) - 1 - n;
+}
 
 function App() {
   const [error, setError] = useState("");
@@ -267,16 +285,55 @@ function App() {
     [sggApiKey]
   );
 
+  const poolsPhases = useMemo(
+    () =>
+      phases.filter(
+        (phase) =>
+          phase.bracketType === "ROUND_ROBIN" &&
+          phase.progressions !== null &&
+          phase.progressions.length > 0
+      ),
+    [phases]
+  );
+  const [poolsPhaseId, setPoolsPhaseId] = useState(0);
+
   const silverPhases = useMemo(
     () =>
       phases.filter(
         (phase) =>
           phase.bracketType === "SINGLE_ELIMINATION" &&
-          phase.progressingInData.length > 0
+          phase.progressingInData.length > 0 &&
+          phase.progressingInData.every((data) => data.origin === poolsPhaseId)
       ),
-    [phases]
+    [phases, poolsPhaseId]
   );
   const [silverPhaseId, setSilverPhaseId] = useState(0);
+
+  const [numPools, setNumPools] = useState(0);
+  const getNumPools = useCallback(
+    async (phaseId: number) => {
+      try {
+        setGetting(true);
+        const data = await fetchGql(sggApiKey, NUM_POOLS_QUERY, {
+          id: phaseId,
+        });
+        setError("");
+        const nodes = data?.phase?.phaseGroups?.nodes;
+        if (Array.isArray(nodes)) {
+          setNumPools(nodes.filter((phaseGroup) => phaseGroup.id).length);
+        } else {
+          setNumPools(0);
+        }
+      } catch (e: unknown) {
+        if (e instanceof Error) {
+          setError(e.message);
+        }
+      } finally {
+        setGetting(false);
+      }
+    },
+    [sggApiKey]
+  );
 
   const [silverEntrants, setSilverEntrants] = useState<{
     pending: Entrant[];
@@ -359,6 +416,8 @@ function App() {
               (a, b) => a.initialSeedNum - b.initialSeedNum
             ),
           });
+        } else {
+          setSilverEntrants({ qualified: [], pending: [] });
         }
       } catch (e: unknown) {
         if (e instanceof Error) {
@@ -369,6 +428,27 @@ function App() {
       }
     },
     [sggApiKey]
+  );
+
+  const [acceptedIds, setAcceptedIds] = useState(new Set<number>());
+  const [rejectedIds, setRejectedIds] = useState(new Set<number>());
+  const qualified = useMemo(
+    () =>
+      silverEntrants.qualified.filter(
+        (entrant) =>
+          !acceptedIds.has(entrant.id) && !rejectedIds.has(entrant.id)
+      ),
+    [acceptedIds, rejectedIds, silverEntrants.qualified]
+  );
+  const accepted = useMemo(
+    () =>
+      silverEntrants.qualified.filter((entrant) => acceptedIds.has(entrant.id)),
+    [acceptedIds, silverEntrants.qualified]
+  );
+  const rejected = useMemo(
+    () =>
+      silverEntrants.qualified.filter((entrant) => rejectedIds.has(entrant.id)),
+    [rejectedIds, silverEntrants.qualified]
   );
 
   return (
@@ -473,7 +553,10 @@ function App() {
                 onClick={() => {
                   setSlug("");
                   setEventId(0);
+                  setPoolsPhaseId(0);
+                  setNumPools(0);
                   setSilverPhaseId(0);
+                  setSilverEntrants({ pending: [], qualified: [] });
                 }}
               >
                 <ListItemIcon>
@@ -516,7 +599,10 @@ function App() {
                     style={{ paddingLeft: 0 }}
                     onClick={() => {
                       setEventId(0);
+                      setPoolsPhaseId(0);
+                      setNumPools(0);
                       setSilverPhaseId(0);
+                      setSilverEntrants({ pending: [], qualified: [] });
                     }}
                   >
                     <ListItemIcon>
@@ -524,16 +610,16 @@ function App() {
                     </ListItemIcon>
                     <ListItemText>Event ID: {eventId}</ListItemText>
                   </ListItemButton>
-                  {!silverPhaseId && (
+                  {!poolsPhaseId && (
                     <>
-                      {silverPhases.length > 0 && (
+                      {poolsPhases.length > 0 && (
                         <List disablePadding>
-                          {silverPhases.map((phase) => (
+                          {poolsPhases.map((phase) => (
                             <ListItemButton
                               key={phase.id}
                               onClick={() => {
-                                setSilverPhaseId(phase.id);
-                                getSilverEntrants(phase.id);
+                                setPoolsPhaseId(phase.id);
+                                getNumPools(phase.id);
                               }}
                             >
                               <ListItemText
@@ -553,11 +639,13 @@ function App() {
                       )}
                     </>
                   )}
-                  {silverPhaseId > 0 && (
+                  {poolsPhaseId > 0 && (
                     <>
                       <ListItemButton
                         style={{ paddingLeft: 0 }}
                         onClick={() => {
+                          setPoolsPhaseId(0);
+                          setNumPools(0);
                           setSilverPhaseId(0);
                           setSilverEntrants({ pending: [], qualified: [] });
                         }}
@@ -566,46 +654,163 @@ function App() {
                           <ArrowBack />
                         </ListItemIcon>
                         <ListItemText>
-                          Silver Phase ID: {silverPhaseId}
+                          Pools Phase ID: {poolsPhaseId}
                         </ListItemText>
                       </ListItemButton>
-                      <Stack
-                        direction="row"
-                        style={{
-                          alignItems: "start",
-                          marginLeft: "-8px",
-                        }}
-                      >
-                        <IconButton
-                          disabled={getting}
-                          style={{ marginTop: "4px" }}
-                          onClick={() => {
-                            getSilverEntrants(silverPhaseId);
-                          }}
-                        >
-                          <Refresh />
-                        </IconButton>
-                        {silverEntrants.pending.length > 0 && (
-                          <List disablePadding>
-                            <ListSubheader>Pending</ListSubheader>
-                            {silverEntrants.pending.map((entrant) => (
-                              <ListItem key={entrant.id}>
-                                <ListItemText>{entrant.name}</ListItemText>
-                              </ListItem>
-                            ))}
-                          </List>
-                        )}
-                        {silverEntrants.qualified.length > 0 && (
-                          <List disablePadding>
-                            <ListSubheader>Qualified</ListSubheader>
-                            {silverEntrants.qualified.map((entrant) => (
-                              <ListItem key={entrant.id}>
-                                <ListItemText>{entrant.name}</ListItemText>
-                              </ListItem>
-                            ))}
-                          </List>
-                        )}
-                      </Stack>
+                      {!silverPhaseId && (
+                        <>
+                          {silverPhases.length > 0 && (
+                            <List disablePadding>
+                              {silverPhases.map((phase) => (
+                                <ListItemButton
+                                  key={phase.id}
+                                  onClick={() => {
+                                    setSilverPhaseId(phase.id);
+                                    getSilverEntrants(phase.id);
+                                  }}
+                                >
+                                  <ListItemText
+                                    style={{
+                                      overflowX: "hidden",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {phase.name}{" "}
+                                    <Typography variant="caption">
+                                      ({phase.id})
+                                    </Typography>
+                                  </ListItemText>
+                                </ListItemButton>
+                              ))}
+                            </List>
+                          )}
+                        </>
+                      )}
+                      {silverPhaseId > 0 && (
+                        <>
+                          <ListItemButton
+                            style={{ paddingLeft: 0 }}
+                            onClick={() => {
+                              setSilverPhaseId(0);
+                              setSilverEntrants({ pending: [], qualified: [] });
+                            }}
+                          >
+                            <ListItemIcon>
+                              <ArrowBack />
+                            </ListItemIcon>
+                            <ListItemText>
+                              Silver Phase ID: {silverPhaseId}
+                            </ListItemText>
+                          </ListItemButton>
+                          <Stack
+                            direction="row"
+                            style={{
+                              alignItems: "start",
+                              marginLeft: "-8px",
+                            }}
+                          >
+                            <IconButton
+                              disabled={getting}
+                              style={{ marginTop: "4px" }}
+                              onClick={() => {
+                                getSilverEntrants(silverPhaseId);
+                              }}
+                            >
+                              <Refresh />
+                            </IconButton>
+                            {silverEntrants.pending.length > 0 && (
+                              <List disablePadding>
+                                <ListSubheader>Pending</ListSubheader>
+                                {silverEntrants.pending.map((entrant) => (
+                                  <ListItem key={entrant.id}>
+                                    <ListItemText>{entrant.name}</ListItemText>
+                                  </ListItem>
+                                ))}
+                              </List>
+                            )}
+                            {qualified.length > 0 && (
+                              <List disablePadding>
+                                <ListSubheader>Qualified</ListSubheader>
+                                {qualified.map((entrant) => (
+                                  <ListItem key={entrant.id}>
+                                    <ListItemText>{entrant.name}</ListItemText>
+                                    <IconButton
+                                      onClick={() => {
+                                        const newRejectedIds = new Set(
+                                          rejectedIds
+                                        );
+                                        newRejectedIds.add(entrant.id);
+                                        setRejectedIds(newRejectedIds);
+                                      }}
+                                    >
+                                      <Close color="error" />
+                                    </IconButton>
+                                    <IconButton
+                                      onClick={() => {
+                                        const newAcceptedIds = new Set(
+                                          acceptedIds
+                                        );
+                                        newAcceptedIds.add(entrant.id);
+                                        setAcceptedIds(newAcceptedIds);
+                                      }}
+                                    >
+                                      <Check color="success" />
+                                    </IconButton>
+                                  </ListItem>
+                                ))}
+                              </List>
+                            )}
+                            {accepted.length > 0 && (
+                              <List disablePadding>
+                                <ListSubheader>Accepted</ListSubheader>
+                                {accepted.map((entrant) => (
+                                  <ListItem key={entrant.id}>
+                                    <ListItemText>
+                                      {getPool(
+                                        entrant.initialSeedNum,
+                                        numPools
+                                      )}{" "}
+                                      - {entrant.name}
+                                    </ListItemText>
+                                    <IconButton
+                                      onClick={() => {
+                                        const newAcceptedIds = new Set(
+                                          acceptedIds
+                                        );
+                                        newAcceptedIds.delete(entrant.id);
+                                        setAcceptedIds(newAcceptedIds);
+                                      }}
+                                    >
+                                      <Close />
+                                    </IconButton>
+                                  </ListItem>
+                                ))}
+                              </List>
+                            )}
+                            {rejected.length > 0 && (
+                              <List disablePadding>
+                                <ListSubheader>Rejected</ListSubheader>
+                                {rejected.map((entrant) => (
+                                  <ListItem key={entrant.id}>
+                                    <ListItemText>{entrant.name}</ListItemText>
+                                    <IconButton
+                                      onClick={() => {
+                                        const newRejectedIds = new Set(
+                                          rejectedIds
+                                        );
+                                        newRejectedIds.delete(entrant.id);
+                                        setRejectedIds(newRejectedIds);
+                                      }}
+                                    >
+                                      <Close />
+                                    </IconButton>
+                                  </ListItem>
+                                ))}
+                              </List>
+                            )}
+                          </Stack>
+                        </>
+                      )}
                     </>
                   )}
                 </>
