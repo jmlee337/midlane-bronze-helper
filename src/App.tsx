@@ -216,6 +216,46 @@ function getPool(initialSeedNum: number, numPools: number) {
   return numPools * (row + 1) - 1 - n;
 }
 
+function getFetchStr(phaseId: number, entrantIds: number[]) {
+  return `
+    fetch("https://www.start.gg/api/-/rest/phase/${phaseId}", {
+      "method": "PUT",
+      "headers": {
+        "client-version": "20",
+        "content-type": "application/json",
+      },
+      "body": \`{"destPhaseLinks": []}\`
+    }).then(() => {
+      fetch("https://www.start.gg/api/-/rest/phase/${phaseId}", {
+        "method": "PUT",
+        "headers": {
+          "client-version": "20",
+          "content-type": "application/json",
+        },
+        "body": \`{
+          "destPhaseLinks": [{
+            "destPhaseId": ${phaseId},
+            "maintainMatchup": false,
+            "isDefault": false,
+            "entrantIds": [
+              ${entrantIds.join(", ")}
+            ],
+            "type": 3,
+            "destSeedOrder": 0,
+            "destBracketSide": 1,
+            "cId": "${phaseId}-1",
+            "initialEntrants": {
+              ${entrantIds
+                .map((entrantId) => `"${entrantId}": true`)
+                .join(", ")}
+            }
+          }]
+        }\`
+      });
+    });
+  `;
+}
+
 function App() {
   const [error, setError] = useState("");
   const [sggApiKey, setSggApiKey] = useState("");
@@ -308,6 +348,17 @@ function App() {
     [phases, poolsPhaseId]
   );
   const [silverPhaseId, setSilverPhaseId] = useState(0);
+
+  const bronzePhases = useMemo(
+    () =>
+      phases.filter(
+        (phase) =>
+          phase.bracketType === "SINGLE_ELIMINATION" &&
+          phase.progressingInData.length === 0
+      ),
+    [phases]
+  );
+  const [bronzePhaseId, setBronzePhaseId] = useState(0);
 
   const [numPools, setNumPools] = useState(0);
   const getNumPools = useCallback(
@@ -557,6 +608,7 @@ function App() {
                   setNumPools(0);
                   setSilverPhaseId(0);
                   setSilverEntrants({ pending: [], qualified: [] });
+                  setBronzePhaseId(0);
                 }}
               >
                 <ListItemIcon>
@@ -603,6 +655,7 @@ function App() {
                       setNumPools(0);
                       setSilverPhaseId(0);
                       setSilverEntrants({ pending: [], qualified: [] });
+                      setBronzePhaseId(0);
                     }}
                   >
                     <ListItemIcon>
@@ -648,6 +701,7 @@ function App() {
                           setNumPools(0);
                           setSilverPhaseId(0);
                           setSilverEntrants({ pending: [], qualified: [] });
+                          setBronzePhaseId(0);
                         }}
                       >
                         <ListItemIcon>
@@ -693,6 +747,7 @@ function App() {
                             onClick={() => {
                               setSilverPhaseId(0);
                               setSilverEntrants({ pending: [], qualified: [] });
+                              setBronzePhaseId(0);
                             }}
                           >
                             <ListItemIcon>
@@ -702,113 +757,184 @@ function App() {
                               Silver Phase ID: {silverPhaseId}
                             </ListItemText>
                           </ListItemButton>
-                          <Stack
-                            direction="row"
-                            style={{
-                              alignItems: "start",
-                              marginLeft: "-8px",
-                            }}
-                          >
-                            <IconButton
-                              disabled={getting}
-                              style={{ marginTop: "4px" }}
-                              onClick={() => {
-                                getSilverEntrants(silverPhaseId);
-                              }}
-                            >
-                              <Refresh />
-                            </IconButton>
-                            {silverEntrants.pending.length > 0 && (
-                              <List disablePadding>
-                                <ListSubheader>Pending</ListSubheader>
-                                {silverEntrants.pending.map((entrant) => (
-                                  <ListItem key={entrant.id}>
-                                    <ListItemText>{entrant.name}</ListItemText>
-                                  </ListItem>
-                                ))}
-                              </List>
-                            )}
-                            {qualified.length > 0 && (
-                              <List disablePadding>
-                                <ListSubheader>Qualified</ListSubheader>
-                                {qualified.map((entrant) => (
-                                  <ListItem key={entrant.id}>
-                                    <ListItemText>{entrant.name}</ListItemText>
-                                    <IconButton
+                          {!bronzePhaseId && (
+                            <>
+                              {bronzePhases.length > 0 && (
+                                <List disablePadding>
+                                  {bronzePhases.map((phase) => (
+                                    <ListItemButton
+                                      key={phase.id}
                                       onClick={() => {
-                                        const newRejectedIds = new Set(
-                                          rejectedIds
-                                        );
-                                        newRejectedIds.add(entrant.id);
-                                        setRejectedIds(newRejectedIds);
+                                        setBronzePhaseId(phase.id);
                                       }}
                                     >
-                                      <Close color="error" />
-                                    </IconButton>
-                                    <IconButton
+                                      <ListItemText
+                                        style={{
+                                          overflowX: "hidden",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                      >
+                                        {phase.name}{" "}
+                                        <Typography variant="caption">
+                                          ({phase.id})
+                                        </Typography>
+                                      </ListItemText>
+                                    </ListItemButton>
+                                  ))}
+                                </List>
+                              )}
+                            </>
+                          )}
+                          {bronzePhaseId > 0 && (
+                            <>
+                              <ListItemButton
+                                style={{ paddingLeft: 0 }}
+                                onClick={() => {
+                                  setBronzePhaseId(0);
+                                }}
+                              >
+                                <ListItemIcon>
+                                  <ArrowBack />
+                                </ListItemIcon>
+                                <ListItemText>
+                                  Bronze Phase ID: {bronzePhaseId}
+                                </ListItemText>
+                              </ListItemButton>
+                              <Stack
+                                direction="row"
+                                style={{
+                                  alignItems: "start",
+                                  marginLeft: "-8px",
+                                }}
+                              >
+                                <IconButton
+                                  disabled={getting}
+                                  style={{ marginTop: "4px" }}
+                                  onClick={() => {
+                                    getSilverEntrants(silverPhaseId);
+                                  }}
+                                >
+                                  <Refresh />
+                                </IconButton>
+                                {silverEntrants.pending.length > 0 && (
+                                  <List disablePadding>
+                                    <ListSubheader>Pending</ListSubheader>
+                                    {silverEntrants.pending.map((entrant) => (
+                                      <ListItem key={entrant.id}>
+                                        <ListItemText>
+                                          {entrant.name}
+                                        </ListItemText>
+                                      </ListItem>
+                                    ))}
+                                  </List>
+                                )}
+                                {qualified.length > 0 && (
+                                  <List disablePadding>
+                                    <ListSubheader>Qualified</ListSubheader>
+                                    {qualified.map((entrant) => (
+                                      <ListItem key={entrant.id}>
+                                        <ListItemText>
+                                          {entrant.name}
+                                        </ListItemText>
+                                        <IconButton
+                                          onClick={() => {
+                                            const newRejectedIds = new Set(
+                                              rejectedIds
+                                            );
+                                            newRejectedIds.add(entrant.id);
+                                            setRejectedIds(newRejectedIds);
+                                          }}
+                                        >
+                                          <Close color="error" />
+                                        </IconButton>
+                                        <IconButton
+                                          onClick={() => {
+                                            const newAcceptedIds = new Set(
+                                              acceptedIds
+                                            );
+                                            newAcceptedIds.add(entrant.id);
+                                            setAcceptedIds(newAcceptedIds);
+                                          }}
+                                        >
+                                          <Check color="success" />
+                                        </IconButton>
+                                      </ListItem>
+                                    ))}
+                                  </List>
+                                )}
+                                {accepted.length > 0 && (
+                                  <List disablePadding>
+                                    <ListSubheader>Accepted</ListSubheader>
+                                    {accepted.map((entrant) => (
+                                      <ListItem key={entrant.id}>
+                                        <ListItemText>
+                                          {getPool(
+                                            entrant.initialSeedNum,
+                                            numPools
+                                          )}{" "}
+                                          - {entrant.name}
+                                        </ListItemText>
+                                        <IconButton
+                                          onClick={() => {
+                                            const newAcceptedIds = new Set(
+                                              acceptedIds
+                                            );
+                                            newAcceptedIds.delete(entrant.id);
+                                            setAcceptedIds(newAcceptedIds);
+                                          }}
+                                        >
+                                          <Close />
+                                        </IconButton>
+                                      </ListItem>
+                                    ))}
+                                  </List>
+                                )}
+                                {rejected.length > 0 && (
+                                  <List disablePadding>
+                                    <ListSubheader>Rejected</ListSubheader>
+                                    {rejected.map((entrant) => (
+                                      <ListItem key={entrant.id}>
+                                        <ListItemText>
+                                          {entrant.name}
+                                        </ListItemText>
+                                        <IconButton
+                                          onClick={() => {
+                                            const newRejectedIds = new Set(
+                                              rejectedIds
+                                            );
+                                            newRejectedIds.delete(entrant.id);
+                                            setRejectedIds(newRejectedIds);
+                                          }}
+                                        >
+                                          <Close />
+                                        </IconButton>
+                                      </ListItem>
+                                    ))}
+                                  </List>
+                                )}
+                                {silverEntrants.pending.length === 0 &&
+                                  qualified.length === 0 &&
+                                  accepted.length > 1 && (
+                                    <Button
+                                      variant="contained"
+                                      style={{ marginTop: "5.75px" }}
                                       onClick={() => {
-                                        const newAcceptedIds = new Set(
-                                          acceptedIds
+                                        navigator.clipboard.writeText(
+                                          getFetchStr(
+                                            bronzePhaseId,
+                                            accepted.map(
+                                              (entrant) => entrant.id
+                                            )
+                                          )
                                         );
-                                        newAcceptedIds.add(entrant.id);
-                                        setAcceptedIds(newAcceptedIds);
                                       }}
                                     >
-                                      <Check color="success" />
-                                    </IconButton>
-                                  </ListItem>
-                                ))}
-                              </List>
-                            )}
-                            {accepted.length > 0 && (
-                              <List disablePadding>
-                                <ListSubheader>Accepted</ListSubheader>
-                                {accepted.map((entrant) => (
-                                  <ListItem key={entrant.id}>
-                                    <ListItemText>
-                                      {getPool(
-                                        entrant.initialSeedNum,
-                                        numPools
-                                      )}{" "}
-                                      - {entrant.name}
-                                    </ListItemText>
-                                    <IconButton
-                                      onClick={() => {
-                                        const newAcceptedIds = new Set(
-                                          acceptedIds
-                                        );
-                                        newAcceptedIds.delete(entrant.id);
-                                        setAcceptedIds(newAcceptedIds);
-                                      }}
-                                    >
-                                      <Close />
-                                    </IconButton>
-                                  </ListItem>
-                                ))}
-                              </List>
-                            )}
-                            {rejected.length > 0 && (
-                              <List disablePadding>
-                                <ListSubheader>Rejected</ListSubheader>
-                                {rejected.map((entrant) => (
-                                  <ListItem key={entrant.id}>
-                                    <ListItemText>{entrant.name}</ListItemText>
-                                    <IconButton
-                                      onClick={() => {
-                                        const newRejectedIds = new Set(
-                                          rejectedIds
-                                        );
-                                        newRejectedIds.delete(entrant.id);
-                                        setRejectedIds(newRejectedIds);
-                                      }}
-                                    >
-                                      <Close />
-                                    </IconButton>
-                                  </ListItem>
-                                ))}
-                              </List>
-                            )}
-                          </Stack>
+                                      Copy Fetch
+                                    </Button>
+                                  )}
+                              </Stack>
+                            </>
+                          )}
                         </>
                       )}
                     </>
