@@ -175,12 +175,19 @@ const EVENT_QUERY = `
   }
 `;
 
-const NUM_POOLS_QUERY = `
-  query NumPoolsQuery($id: ID) {
-    phase(id: $id) {
-      phaseGroups(query: { page: 1, perPage: 512 }) {
+const SILVER_ENTRANTS_QUERY = `
+  query SilverEntrantsQuery($phaseId: ID) {
+    phase(id: $phaseId) {
+      seeds(query: { page: 1, perPage: 332 }) {
         nodes {
-          id
+          entrant {
+            id
+          }
+          progressionSource {
+            originPhaseGroup {
+              displayIdentifier
+            }
+          }
         }
       }
     }
@@ -190,7 +197,7 @@ const NUM_POOLS_QUERY = `
 const SILVER_SETS_QUERY = `
   query SilverSetsQuery($id: ID) {
     phase(id: $id) {
-      sets(page: 1, perPage: 191, filters: { hideEmpty: true }) {
+      sets(page: 1, perPage: 142, filters: { hideEmpty: true }) {
         nodes {
           displayScore
           slots {
@@ -206,15 +213,6 @@ const SILVER_SETS_QUERY = `
     }
   }
 `;
-
-function getPool(initialSeedNum: number, numPools: number) {
-  const n = initialSeedNum - 1;
-  const row = Math.floor(n / numPools);
-  if (row % 2 === 0) {
-    return n % numPools;
-  }
-  return numPools * (row + 1) - 1 - n;
-}
 
 function getFetchStr(phaseId: number, entrantIds: number[]) {
   return `
@@ -360,21 +358,28 @@ function App() {
   );
   const [bronzePhaseId, setBronzePhaseId] = useState(0);
 
-  const [numPools, setNumPools] = useState(0);
-  const getNumPools = useCallback(
+  const [entrantIdToPoolName, setEntrantIdToPoolName] = useState(
+    new Map<number, string>()
+  );
+  const getEntrantIdToPoolName = useCallback(
     async (phaseId: number) => {
       try {
         setGetting(true);
-        const data = await fetchGql(sggApiKey, NUM_POOLS_QUERY, {
-          id: phaseId,
+        const data = await fetchGql(sggApiKey, SILVER_ENTRANTS_QUERY, {
+          phaseId,
         });
         setError("");
-        const nodes = data?.phase?.phaseGroups?.nodes;
+        const nodes = data?.phase?.seeds?.nodes;
+        const newEntrantIdToPoolName = new Map<number, string>();
         if (Array.isArray(nodes)) {
-          setNumPools(nodes.filter((phaseGroup) => phaseGroup.id).length);
-        } else {
-          setNumPools(0);
+          nodes.forEach((seed) => {
+            newEntrantIdToPoolName.set(
+              seed.entrant.id,
+              seed.progressionSource?.originPhaseGroup?.displayIdentifier ?? ""
+            );
+          });
         }
+        setEntrantIdToPoolName(newEntrantIdToPoolName);
       } catch (e: unknown) {
         if (e instanceof Error) {
           setError(e.message);
@@ -605,8 +610,8 @@ function App() {
                   setSlug("");
                   setEventId(0);
                   setPoolsPhaseId(0);
-                  setNumPools(0);
                   setSilverPhaseId(0);
+                  setEntrantIdToPoolName(new Map());
                   setSilverEntrants({ pending: [], qualified: [] });
                   setBronzePhaseId(0);
                 }}
@@ -652,8 +657,8 @@ function App() {
                     onClick={() => {
                       setEventId(0);
                       setPoolsPhaseId(0);
-                      setNumPools(0);
                       setSilverPhaseId(0);
+                      setEntrantIdToPoolName(new Map());
                       setSilverEntrants({ pending: [], qualified: [] });
                       setBronzePhaseId(0);
                     }}
@@ -672,7 +677,6 @@ function App() {
                               key={phase.id}
                               onClick={() => {
                                 setPoolsPhaseId(phase.id);
-                                getNumPools(phase.id);
                               }}
                             >
                               <ListItemText
@@ -698,8 +702,8 @@ function App() {
                         style={{ paddingLeft: 0 }}
                         onClick={() => {
                           setPoolsPhaseId(0);
-                          setNumPools(0);
                           setSilverPhaseId(0);
+                          setEntrantIdToPoolName(new Map());
                           setSilverEntrants({ pending: [], qualified: [] });
                           setBronzePhaseId(0);
                         }}
@@ -720,6 +724,7 @@ function App() {
                                   key={phase.id}
                                   onClick={() => {
                                     setSilverPhaseId(phase.id);
+                                    getEntrantIdToPoolName(phase.id);
                                     getSilverEntrants(phase.id);
                                   }}
                                 >
@@ -746,6 +751,7 @@ function App() {
                             style={{ paddingLeft: 0 }}
                             onClick={() => {
                               setSilverPhaseId(0);
+                              setEntrantIdToPoolName(new Map());
                               setSilverEntrants({ pending: [], qualified: [] });
                               setBronzePhaseId(0);
                             }}
@@ -868,10 +874,7 @@ function App() {
                                     {accepted.map((entrant) => (
                                       <ListItem key={entrant.id}>
                                         <ListItemText>
-                                          {getPool(
-                                            entrant.initialSeedNum,
-                                            numPools
-                                          )}{" "}
+                                          {entrantIdToPoolName.get(entrant.id)}{" "}
                                           - {entrant.name}
                                         </ListItemText>
                                         <IconButton
