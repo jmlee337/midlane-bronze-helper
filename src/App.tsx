@@ -149,6 +149,7 @@ const ADMINED_TOURNAMENTS_QUERY = `
 const TOURNAMENT_QUERY = `
   query TournamentQuery($slug: String) {
     tournament(slug: $slug) {
+      slug
       events {
         id
         name
@@ -300,7 +301,7 @@ function App() {
           slug: newSlug,
         });
         setError("");
-        setSlug(newSlug);
+        setSlug(data.tournament.slug.slice(11));
         const newEvents = data.tournament.events;
         setEvents(newEvents ?? []);
       } catch (e: unknown) {
