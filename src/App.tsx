@@ -268,7 +268,17 @@ function App() {
         if (sggApiKey) {
           const data = await fetchGql(sggApiKey, ADMINED_TOURNAMENTS_QUERY, {});
           setError("");
-          setTournaments(data.currentUser.tournaments.nodes ?? []);
+          const nodes = data.currentUser?.tournaments?.nodes;
+          if (Array.isArray(nodes)) {
+            setTournaments(
+              nodes.map((tournament) => ({
+                name: tournament.name,
+                slug: tournament.slug.slice(11),
+              }))
+            );
+          } else {
+            setTournaments([]);
+          }
         }
       } catch (e: unknown) {
         setTournaments([]);
@@ -931,7 +941,7 @@ function App() {
                                       >
                                         Paste into console on{" "}
                                         <Link
-                                          href={`https://www.start.gg/admin/${slug}/bracket-setup`}
+                                          href={`https://www.start.gg/admin/tournament/${slug}/bracket-setup`}
                                           target="_blank"
                                           variant="body2"
                                         >
