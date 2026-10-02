@@ -507,6 +507,8 @@ function App() {
     [rejectedIds, silverEntrants.qualified]
   );
 
+  const [copied, setCopied] = useState(false);
+
   return (
     <Stack style={{ alignItems: "start" }}>
       {!sggApiKey && (
@@ -918,22 +920,43 @@ function App() {
                                 {silverEntrants.pending.length === 0 &&
                                   qualified.length === 0 &&
                                   accepted.length > 1 && (
-                                    <Button
-                                      variant="contained"
-                                      style={{ marginTop: "5.75px" }}
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(
-                                          getFetchStr(
-                                            bronzePhaseId,
-                                            accepted.map(
-                                              (entrant) => entrant.id
+                                    <Stack>
+                                      <Typography
+                                        variant="body2"
+                                        style={{ lineHeight: "48px" }}
+                                      >
+                                        Paste into console on{" "}
+                                        <Link
+                                          href={`https://www.start.gg/admin/${slug}/bracket-setup`}
+                                          target="_blank"
+                                          variant="body2"
+                                        >
+                                          this page
+                                        </Link>
+                                        .
+                                      </Typography>
+                                      <Button
+                                        disabled={copied}
+                                        variant="contained"
+                                        style={{ marginTop: "5.75px" }}
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(
+                                            getFetchStr(
+                                              bronzePhaseId,
+                                              accepted.map(
+                                                (entrant) => entrant.id
+                                              )
                                             )
-                                          )
-                                        );
-                                      }}
-                                    >
-                                      Copy Fetch
-                                    </Button>
+                                          );
+                                          setCopied(true);
+                                          setTimeout(() => {
+                                            setCopied(false);
+                                          }, 5000);
+                                        }}
+                                      >
+                                        {copied ? "Copied!" : "Copy Fetch"}
+                                      </Button>
+                                    </Stack>
                                   )}
                               </Stack>
                             </>
