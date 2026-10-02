@@ -223,7 +223,7 @@ function getFetchStr(phaseId: number, entrantIds: number[]) {
         "content-type": "application/json",
       },
       "body": \`{"destPhaseLinks": []}\`
-    }).then(() => {
+    }).then(() => 
       fetch("https://www.start.gg/api/-/rest/phase/${phaseId}", {
         "method": "PUT",
         "headers": {
@@ -249,7 +249,11 @@ function getFetchStr(phaseId: number, entrantIds: number[]) {
             }
           }]
         }\`
-      });
+      })
+    ).then(() => {
+      console.log('success! now check the seeding to avoid rematches from pools!');
+    }, () => {
+      console.log('error! try again.');
     });
   `;
 }
